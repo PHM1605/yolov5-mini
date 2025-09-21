@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pydantic
+numpy
+torch
+torchvision
+Pillow
+opencv-python
+tqdm
+pyyaml
