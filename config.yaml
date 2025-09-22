@@ -1,0 +1,14 @@
+epochs: 20
+batch_size: 32
+img_size: 256
+lr: 0.001
+momentum: 0.937
+weight_decay: 0.0005
+warmup_epochs: 1
+# model
+num_classes: 2
+anchors: [[10,13], [16,30], [33,23]] # 3 standard size of boxes
+# data
+data_dir: data
+train_split: train 
+val_split: val 
