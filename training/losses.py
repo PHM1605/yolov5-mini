@@ -21,6 +21,28 @@ def bbox_ciou(box1, box2, eps=1e-7):
   inter_x2 = torch.min(b1_x2[:,None], b2_x2[None,:]) # (N,M)
   inter_y2 = torch.min(b1_y2[:,None], b2_y2[None,:]) # (N,M)
   inter = (inter_x2-inter_x1).clamp(0) * (inter_y2-inter_y1).clamp(0)
+  # area
+  area1 = (b1_x2-b1_x1) * (b1_y2-b1_y1) 
+  area2 = (b2_x2-b2_x1) * (b2_y2-b2_y1)
+  union = area[:,None] + area2[None,:] - inter 
+  # iou
+  iou = inter / (union + eps)
+  # diagonal**2 of the box <enc> enclosing 2 boxes 
+  enc_w = torch.max(b1_x2[:,None], b2_x2[None,:]) - torch.min(b1_x1[:,None], b2_x1[None,:])
+  enc_h = torch.max(b1_y2[:,None], b2_y2[None,:]) - torch.min(b1_y1[:,None], b2_y1[None,:])
+  diag2 = enc_w**2 + enc_h**2 + eps # (N,M)
+  # center-distance**2 of the two boxes
+  cen_x_b1, cen_y_b1 = (b1_x1+b1_x2)/2, (b1_y1+b1_y2)/2
+  cen_x_b2, cen_y_b2 = (b2_x1+b2_x2)/2, (b2_y1+b2_y2)/2
+  dist2 = (cen_x_b1[:,None]-cen_x_b2[None,:])**2 + (cen_y_b1[:,None]-cen_y_b2[None,:])**2
+  # aspect ratio term
+  angle1 = torch.atan((b1_x2-b1_x1)/(b1_y2-b1_y1+eps))
+  angle2 = torch.atan((b2_x2-b2_x1)/(b2_y2-b2_y1+eps))
+  v = (4/(3.1416**2)) * (angle1[:,None] - angle2[None,:])**2 # (N,M)
+  with torch.no_grad():
+    alpha = v / (1-iou+v+eps)
+  ciou = iou - dist2/diag2 - alpha*v
+  return ciou 
 
 class YoloLoss(nn.Module):
   def __init__(self, cls, obj):
@@ -45,4 +67,15 @@ class YoloLoss(nn.Module):
       pr = pred[grid_anchor,grid_y,grid_x,:4] # (4,)
       if pr.ndim == 1:
         pr = pr.unsqueeze(0) # (1,4)
-      ciou = bbox_ciou(pr, pred["box"])
+      # Complete IoU
+      ciou = bbox_ciou(pr, pred["box"]) 
+      loss_box = 1.0 - ciou.mean()
+      # class prediction loss
+      cls_pred = pred[grid_anchor, grid_y, grid_x, 5:] # (num_classes,)
+      cls_true = tar["cls"].float()
+      loss_cls = self.cls_loss(cls_pred, cls_true)
+
+      # total loss 
+      total_loss += (loss_obj + loss_box + loss_cls)
+      
+    return total_loss
