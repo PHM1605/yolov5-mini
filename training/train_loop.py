@@ -32,8 +32,9 @@ class Trainer:
     train_loader, val_loader = self.loaders()
     best = float('inf')
     hist = []
-    self.model.train()
+    
     for epoch in range(cfg['epochs']):
+      self.model.train()
       total_loss = 0
       # targets: list of {"cls":(num_classes,), "grid_x":(1,), "grid_y":(1,), "grid_anchor":(1,), "box":(1,4)}
       for imgs, targets in tqdm(train_loader, desc=f"Train {epoch+1}/{cfg['epochs']}"):
@@ -52,6 +53,14 @@ class Trainer:
         loss.backward()
         self.opt.step()
         total_loss += loss.item()
-      
-
+      # validation: simple obj accuracy (does model mark correct cell?)
+      self.model.eval()
+      correct = 0 
+      total = 0
+      with torch.no_grad():
+        for imgs, targets in val_loader:
+          imgs = imgs.to(self.device)
+          preds = self.model(imgs) # (batch, num_anchors, row_cells, col_cells, 5+num_classes)
+          batch, num_anchors, row_cells, col_cells, _ = preds.shape 
+          
 
