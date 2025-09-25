@@ -24,7 +24,7 @@ def bbox_ciou(box1, box2, eps=1e-7):
   # area
   area1 = (b1_x2-b1_x1) * (b1_y2-b1_y1) 
   area2 = (b2_x2-b2_x1) * (b2_y2-b2_y1)
-  union = area[:,None] + area2[None,:] - inter 
+  union = area1[:,None] + area2[None,:] - inter 
   # iou
   iou = inter / (union + eps)
   # diagonal**2 of the box <enc> enclosing 2 boxes 
@@ -53,6 +53,8 @@ class YoloLoss(nn.Module):
   def forward(self, predict, target):
     # predict: (batch, num_anchors, H, W, 5+num_classes)
     # target: list of {"cls":(num_classes,), "grid_x":(1,), "grid_y":(1,), "grid_anchor":(1,), "box":(1,4)}
+    loss_obj = loss_box = loss_cls = 0
+    total_loss = 0
     for pred, tar in zip(predict, target):
       if tar is None:
         obj_target = torch.zeros_like(pred[...,4]) 
@@ -65,17 +67,15 @@ class YoloLoss(nn.Module):
       loss_obj += self.obj_loss(pred[...,4], obj_target)
       # box_loss calculation
       pr = pred[grid_anchor,grid_y,grid_x,:4] # (4,)
-      if pr.ndim == 1:
-        pr = pr.unsqueeze(0) # (1,4)
       # Complete IoU
-      ciou = bbox_ciou(pr, pred["box"]) 
-      loss_box = 1.0 - ciou.mean()
+      ciou = bbox_ciou(pr, tar["box"]) 
+      loss_box += 1.0 - ciou.mean()
       # class prediction loss
       cls_pred = pred[grid_anchor, grid_y, grid_x, 5:] # (num_classes,)
       cls_true = tar["cls"].float()
-      loss_cls = self.cls_loss(cls_pred, cls_true)
+      loss_cls += self.cls_loss(cls_pred, cls_true)
 
-      # total loss 
-      total_loss += (loss_obj + loss_box + loss_cls)
+    # total loss 
+    total_loss = loss_obj + loss_box + loss_cls
       
     return total_loss

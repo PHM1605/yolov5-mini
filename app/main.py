@@ -10,7 +10,7 @@ app = FastAPI(title="YOLOv5-mini Toy")
 async def train():
   if state.running:
     return {"status": "already running"}
-  cfg = yaml.safeload(open('config.yaml'))
+  cfg = yaml.safe_load(open('config.yaml'))
   os.makedirs('runs/exp1', exist_ok=True)
   state.running = True 
   state.epoch = 0
@@ -18,7 +18,10 @@ async def train():
   state.history = []
 
   trainer = Trainer(cfg)
-
+  hist = trainer.train()
+  state.history = hist
+  state.val_acc = hist[-1]['val_acc'] if hist else 0.0
+  state.running = False
 
   return {"status":"done", "metrics":state.history}
 

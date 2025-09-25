@@ -12,13 +12,13 @@ def conv_bn_relu(channel_in, channel_out, kernel=3, stride=1, padding=1):
 class CSPBlock(nn.Module):
   def __init__(self, channel, n=1):
     super().__init__()
-    modules = []
+    layers = []
     for _ in range(n):
-      modules += [conv_bn_relu(channel, channel), conv_bn_relu(channel, channel)]
-    self.modules = nn.Sequential(*modules)
+      layers += [conv_bn_relu(channel, channel), conv_bn_relu(channel, channel)]
+    self.block = nn.Sequential(*layers)
   
   def forward(self, x):
-    return x + self.modules(x)
+    return x + self.block(x)
 
 class YoloMini(nn.Module):
   def __init__(self, num_classes=2, num_anchors=3):
@@ -26,7 +26,7 @@ class YoloMini(nn.Module):
     self.stem = nn.Sequential(
       conv_bn_relu(3, 32, 3, 2, 1), # (3,256,256) => (32,128,128)
       conv_bn_relu(32, 64, 3, 2, 1), # (32,128,128) => (64,64,64)
-      CSPBlock(64, 1) # (64,64,62)
+      CSPBlock(64, 1), # (64,64,62)
       conv_bn_relu(64, 128, 3, 2, 1), # (128,32,32)
       CSPBlock(128,1) # (128,32,32)
     )
