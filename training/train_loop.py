@@ -8,6 +8,24 @@ from .dataset import YoloToyDataset
 from tqdm import tqdm 
 import os, json, math
 
+# box1, box2: (cx, cy, w, h) (normalized)
+def compute_iou(box1, box2):
+  def to_xyxy(cx, cy, w, h):
+    return [cx-w/2, cy-h/2, cx+w/2, cy+h/2]
+  
+  x1, y1, x2, y2 = to_xyxy(box1[0], box1[1], box1[2], box1[3])
+  x1g, y1g, x2g, y2g = to_xyxy(box2[0], box2[1], box2[2], box2[3])
+  
+  xi1 = max(x1, x1g)
+  yi1 = max(y1, y1g)
+  xi2 = min(x2, x2g)
+  yi2 = min(y2, y2g)
+  inter = max(0, xi2-xi1) * max(0, yi2-yi1)
+  area1 = (x2-x1) * (y2-y1)
+  area2 = (x2g-x1g) * (y2g-y1g)
+  union = area1 + area2 - inter 
+  return inter / (union + 1e-6)
+
 class Trainer:
   def __init__(self, cfg):
     self.cfg = cfg 
@@ -66,18 +84,38 @@ class Trainer:
       with torch.no_grad():
         for imgs, targets in val_loader:
           imgs = imgs.to(self.device)
-          pred = self.model(imgs)
-          batch, num_anchors, h_cell, w_cell, _ = pred.shape # last dim: 5+num_classes
-          obj = pred[...,4] # (batch, num_anchors, h_cell, w_cell)
-          best_idx = obj.view(batch,-1).argmax(-1) # argmax of (batch, num_anchors*h_cell*w_cell)
-          grid_x = best_idx % w_cell
-          grid_y = (best_idx // w_cell) % h_cell
-          grid_anchor = (best_idx // (h_cell*w_cell)) % num_anchors
-          for idx, tar in enumerate(targets):
-            if tar is None: continue
-            if grid_x[idx].item()==tar['grid_x'].item() and grid_y[idx].item()==tar['grid_y'].item():
+          preds = self.model(imgs) # (batch,num_anchors,h_cell,w_cell,5+num_classes)
+          batch, num_anchors, h_cell, w_cell, dim = pred.shape # last dim: 5+num_classes
+          cell_size = self.cfg["img_size"] // h_cell 
+
+          for img_idx in range(batch):
+            if targets[img_idx] is None:
+              continue 
+            pred = preds[img_idx] # (num_anchors,h_cell,w_cell,5+num_classes)
+            obj = pred[...,4] # (num_anchors,h_cell,w_cell)
+            # obj.argmax(): flatten, then tell which cell has object
+            # unravel_index(): location anchor & grid_x & grid_y of that max cell
+            anchor, grid_x, grid_y = torch.unravel_index(obj.argmax(), obj.shape)
+            # predicted values
+            pr = pred[anchor,grid_x,grid_y] # (5+num_classes,)
+            pred_cls = pr[5:].argmax().item() # a number
+            # Predicted box - in image-size-percent
+            cx_cell = torch.sigmoid(pr[0]).item()
+            cy_cell = torch.sigmoid(pr[1]).item()
+            cx_abs = (grid_x+cx_cell) / w_cell 
+            cy_abs = (grid_y+cy_cell) / h_cell 
+            w = torch.exp(pr[2]).item() / self.cfg["img_size"]
+            h = torch.exp(pr[3]).item() / self.cfg["img_size"]
+            # ground-truth
+            tgt = targets[img_idx]
+            tgt_cls = tgt["cls"].argmax().item()
+            cx_gt, cy_gt, w_gt, h_gt = tgt["box"].squeeze().tolist()
+            # check if iou>0.5 and class match
+            iou = compute_iou([cx_abs,cy_abs,w,h], [cx_gt,cy_gt,w_gt,h_gt])
+            if pred_cls == tgt_cls and iou>0.5:
               correct += 1
             total += 1
+
       # epoch summary
       val_acc = correct / max(total, 1)
       avg_loss = total_loss / len(train_loader)
